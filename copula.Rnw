@@ -1,0 +1,1008 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+
+\title{P7: Copula and Risk}
+\author{Group 2: Alan Kachmazov, Tobias Zotter}
+\date{April 2023}
+
+\begin{document}
+
+
+\maketitle
+
+\section{Introduction}
+\subsection{Problem Statement}
+For completeness we shall state the problem statement in the introduction. Consider two assets $S_1 = e^{-\frac{\sigma_1^2}{2} + \sigma_1 Y_1}$
+and $S_2 = e^{-\frac{\sigma_2^2}{2} + \sigma_2 Y_2}$ with $\sigma_i > 0$ and
+$Y_i \sim N(0, 1)$ for $i = 1,2$. However, $Y_1$ and $Y_2$ are not necessarily independent or jointly
+normally distributed.
+
+Consider the following cases for the joint distribution of $Y_1$ and $Y_2$:
+
+\hspace{0.5cm} \textbf{P1}: $Y_1$ and $Y_2$ are independent
+
+\hspace{0.5cm} \textbf{P2}: $Y_1 = Y_2$
+
+\hspace{0.5cm} \textbf{P3}: $Y_1 = -Y_2$
+
+\hspace{0.5cm} \textbf{P4}: $Y_2 = Y_1$ or $Y_2 = -Y_1$ both with probability 1/2
+
+\hspace{0.5cm} \textbf{P5}: sign($Y_1$) = sign($Y_2$): generate $Y_1 \sim N(0, 1)$,
+$Z_2 \sim N(0, 1)$ independent and take $Y_2 = Z_2$ if $Y_1Z_2 >= 0$ and
+$Y_2 = -Z_2$ else.
+
+Let $V = S_1 + S_2$ denote a portfolio. The probability distribution of this portfolio for P1-P5 should be
+simulated and compared by QQ-plots. Furthermore, estimate the value at risk of level $\alpha$, compute
+confidence intervals for the VaR and estimate the sample size necessary to have an estimate of
+accuracy $\pm 1\%$.
+For the computation consider the cases $\alpha = 0.05$, $\alpha = 0.01$, and $(\sigma_1^2, \sigma_2^2) = (0.5, 0.5)$, $(\sigma_1^2, \sigma_2^2) = (1,0.1)$.
+
+\subsection{Log-Normal Distributions, Copulas and Risk}
+As a first step, we must make some essential observations. Independent of the cases for the joint distribution $Y_1$ and $Y_2$, the two assets $S_1$ and $S_2$ are log-normally distributed because they are obtained by exponentiation of the sum of a constant term and a \(standard\) normally distributed random variable. Taking the natural logarithm of both sides, we have: $\ln S_1 = -\frac{\sigma_1^2}{2} + \sigma_1 Y_1$ and $\ln S_2 = -\frac{\sigma_2^2}{2} + \sigma_2 Y_2$. This, of course, corresponds to the definition of the log-normal distribution as a probability distribution that describes the random variable whose natural logarithm follows a normal distribution. In general, the sum of two log-normally distributed random variables, $V = S_1 + S_2$, is not log-normal, but it can be approximated by a log-normal distribution under certain conditions. \\
+A copula is a mathematical function that links the marginal distributions of a set of random variables to their joint distribution. In other words, it is a way to model the dependence structure between random variables separately from their individual marginal distributions. In our context, the copula is a useful tool for modeling the dependence between the two assets $S_1$ and $S_2$.
+Although the definition of the Value at Risk \(VaR\) has been already stated in the course, we should briefly revise it for comprehensiveness. The  VaR is a risk measure that quantifies the maximum loss expected on a portfolio over a given time period at a certain confidence level. For a portfolio $V$, the VaR at a confidence level $\alpha$ is defined as the $\alpha$-quantile of the portfolio's distribution, i.e., the portfolio value below which there is a probability of $\alpha$ of incurring losses. It is is a widely used risk measure in finance.
+
+\section{First Problem}
+We implement a rather simple function for the case that $Y_1$ and $Y_2$ are independent. Note that this assumption is used when simulating the standard normal variables $Y_1$ and $Y_2$ in the \texttt{calc\_V1} function. If this assumption were violated, then the simulation would not accurately reflect the true distribution of $V$. \\
+The bootstrap is a resampling technique that involves drawing repeated samples from the original data set with replacement. Each sample has the same size as the original data set. The goal of the bootstrap is to estimate the sampling distribution of a statistic by generating many new data sets, calculating the statistic for each one, and then using the empirical distribution of those statistics to make inferences about the population parameter. To perform the bootstrap, we repeatedly resample from the simulated $V1$ distribution to create a new dataset of the same size as the original. We then compute the VaR on each of these new datasets, resulting in a distribution of VaR estimates. This distribution is used to estimate the variability of the VaR estimate and to calculate a confidence interval around it.
+
+
+<<firstproblem, echo=TRUE, eval=TRUE>>=
+simulate_V1 <- function(sigma1, sigma2, alpha, n, N = 1000) {
+  # Define function to calculate V1
+  calc_V1 <- function() {
+    # Simulate standard normal variables Y1 and Y2
+    Y1 <- rnorm(n)
+    Y2 <- rnorm(n)
+
+    # Calculate S1 and S2
+    S1 <- exp((-sigma1^2/2) + sigma1*Y1)
+    S2 <- exp((-sigma2^2/2) + sigma2*Y2)
+
+    # Calculate V1 = S1 + S2
+    V1 <- S1 + S2
+
+    return(V1)
+  }
+
+  # Simulate V1 values
+  sim_V1 <- replicate(N, calc_V1())
+  
+
+  # Calculate VaR at alpha level
+  VaR <- quantile(sim_V1, 1-alpha, names = FALSE)
+  
+  # Bootstrap
+  B <- 1000
+  VaR_boot <- numeric(B)
+  for (i in 1:B) {
+    # Resample from V1 distribution
+    V1_boot <- sample(sim_V1, n, replace=TRUE)
+
+    # Compute VaR at alpha level
+    VaR_boot[i] <- quantile(V1_boot, 1-alpha)
+  }
+
+  # Calculate confidence intervals
+  lower <- quantile(VaR_boot, alpha/2)
+  upper <- quantile(VaR_boot, 1-alpha/2)
+
+  # Return results as list
+  return(list(sim_V1 = sim_V1, VaR = VaR, lower = lower, upper = upper))
+}
+@
+
+We now define a function \texttt{plot\_density\_V1} to plot the distribution of $V_1$.
+
+<<echo=TRUE, eval=TRUE>>=
+plot_density_V1 <- function(a) {
+  # Extract simulation results
+  sim_V1 <- a$sim_V1
+  VaR <- a$VaR
+  
+  # Create density plot
+  plot(density(sim_V1), main = "Density plot of V1", xlim = c(0,10), ylim =c(0,3))
+  
+  # Add vertical lines for VaR and confidence interval
+  abline(v = VaR, col = "red", lwd = 2, lty = "dashed")
+  
+  # Add legend
+  legend("topright", legend = c("VaR"),
+         col = c("red"), lty = c("dashed"), lwd = 2)
+}
+@
+
+We can create a QQ-Plot to check whether the $V1$ is log normally distributed. In order to do so, we take the logarithm of the random variable $V1$ and do a normal QQ-Plot.
+
+<<echo=TRUE, eval=TRUE>>=
+log_plot_qq <- function(b) {
+  V1 <- b$sim_V1
+  
+  # Log-transform V1
+  log_V1 <- log(V1)
+  
+  # Create QQ-plot
+  qqnorm(log_V1)
+  qqline(log_V1, col = "red")
+}
+@
+
+Now we can also create a QQ-Plot to check whether $V1$ follows normal distribution or not. 
+
+<<echo=TRUE, eval=TRUE>>=
+plot_qq <- function(b) {
+  V1 <- b$sim_V1
+  
+  # Create QQ-plot
+  qqnorm(V1, ylim = c(0,30))
+  qqline(V1, col = "red")
+}
+@
+Finally, we can now look at the different cases.
+
+<<diffcases11, echo=TRUE, eval=TRUE>>=
+results_01 <- simulate_V1(0.5, 0.5, 0.05, 10^4)
+final_results_01 <- results_01[c("VaR", "lower", "upper")]
+
+results_02 <-simulate_V1(0.5, 0.5, 0.01, 10^4)
+final_results_02 <- results_02[c("VaR", "lower", "upper")]
+
+results_03 <- simulate_V1(1, 0.1, 0.05, 10^4)
+final_results_03 <- results_03[c("VaR", "lower", "upper")]
+
+results_04 <-simulate_V1(1, 0.1, 0.01, 10^4)
+final_results_04 <- results_04[c("VaR", "lower", "upper")]
+@
+
+Using $(\sigma_1^2, \sigma_2^2) = (0.5, 0.5)$, and then, first, $\alpha = 0.05$ followed by $\alpha = 0.01$, we can clearly see that the VaR is higher for a higher level of confidence. Generally, we expected this, since, if we are more confident that a loss will not exceed a certain amount, we will be willing to accept a smaller potential loss. Therefore, as the level of confidence increases, the VaR will also increase to reflect the smaller potential loss that we are willing to accept.
+
+<<diffcases12, echo=TRUE, eval=TRUE>>=
+final_results_01
+final_results_02
+@
+
+Using $(\sigma_1^2, \sigma_2^2) = (1, 0.1)$, and then, first, $\alpha = 0.05$ followed by $\alpha = 0.01$, we can clearly see that the VaR is higher for a higher level of confidence. Generally, we expected this. At both levels of confidence, the VaR is higher than in our earlier calculations. Rather naturally, riskier assets will lead to a higher VaR.
+
+<<diffcases13, echo=TRUE, eval=TRUE>>=
+final_results_03
+final_results_04
+@
+
+And we may also have a look at $V_1$ itself. The graph on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the graph on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. Note that we use $\alpha = 0.05$ in both cases. We can see that Value at Risk is shifted to the right in the second case which indicates that it is higher and the portfolio is riskier than the one on the left. 
+
+<<firstgraphic1,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+plot_density_V1(results_01)
+plot_density_V1(results_03)
+@
+
+To visually speculate about the log-normality of $V1$, we can create a QQ-Plot. The plot on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the graph on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. Again, we use $\alpha = 0.5$ in both cases. Furthermore, we reduced $n$ due to computational capacity problems. From this QQ-Plot we can deduce, that in the first case, $V1$ is log-normally distributed. In our second case, we can infer that $V1$ is not log-normally distributed. 
+
+<<secondgraphic1,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+log_plot_qq(simulate_V1(0.5,0.5,0.05,10^2))
+log_plot_qq(simulate_V1(1,0.1,0.05,10^2))
+@
+
+Let's look at the same cases of $V1$ as in previous QQ-Plot but now we will check if it is normally distributed. Even though in previous plot the first case with $\sigma_1 = 0.5$, $\sigma_2 = 0.5$ and $\alpha = 0.5$ was log-normaly distribtued, it is not normaly distributed. We can see that in both cases distribution is skewed to the right and doesn't follow normal distribution. We use the same cases of $\sigma$ and $\alpha$ as in the previous plot: the plot on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the plot on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. We can clearly see that plot on the right has a heavier tail than the distribution on the left which implies that extreme values are more likely to occur. All that indicates that the portfolio on the right is riskier than the one on the left.
+<<thirdgraphic,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+plot_qq(simulate_V1(0.5,0.5,0.05,10^2))
+plot_qq(simulate_V1(1,0.1,0.05,10^2))
+
+par(mfrow=c(1,2))
+plot_qq(simulate_V1(0.5,0.5,0.01,10^2))
+plot_qq(simulate_V1(1,0.1,0.01,10^2))
+@
+
+Lastly, we estimate the sample size necessary to have an estimate of accuracy of $\pm 1\%$.
+
+<<acc1, echo=TRUE, eval=TRUE>>=
+estimate_sample_size_VaR01 <- function(sigma1, sigma2, alpha, accuracy) {
+  B <- 1000
+  n <- 10 # Initial sample size
+  
+  while (TRUE) {
+    
+    # Simulate V1 with current sample size and current sigma estimate
+    res <- simulate_V1(sigma1, sigma2, alpha, n)
+    
+    # Extract VaR from simulation result
+    VaR <- res$VaR
+    
+    # Bootstrap to estimate standard deviation of VaR
+    VaR_boot <- numeric(B)
+    for (i in 1:B) {
+      # Resample from V1 distribution
+      V1_boot <- sample(res$sim_V1, n, replace=TRUE)
+      
+      # Compute VaR at alpha level
+      VaR_boot[i] <- quantile(V1_boot, 1-alpha)
+    }
+    
+    # Calculate standard deviation and mean of VaR
+    var_VaR <- var(VaR_boot)
+    mean_VaR <- mean(VaR_boot)
+    
+    # Calculate sample size using Chebyshev's inequality
+    n_new <- ceiling((var_VaR / (mean_VaR^2)) * (1/((alpha^2)*(accuracy))))
+    
+    # Check if the sample size has converged
+    if (abs(n_new - n) < 1) {
+      break
+    }
+    
+    # update sample size
+    n <- n_new
+    
+  }
+  return(n)
+}
+@
+
+Using $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$ in the first case and $\sigma_1 = 1$ and $\sigma_2 = 0.1$ in the second case, we get the following:
+
+<<echo=TRUE, eval=FALSE>>=
+estimate_sample_size_VaR01(0.5,0.5,0.05,0.01)
+estimate_sample_size_VaR01(1,0.1,0.05,0.01)
+@
+Unfortunately, it is not the most effective algorithm to estimate minimal sample size for given level of accuracy and it takes extremely long to compute. Sample size for the first set of parameters is 159 and for the second one it is 316.
+Notice that our estimate for the sample size is lower when using equal values for $\sigma_i$ for $i = 1,2$.
+
+\section{Second Problem}
+In this problem we will consider the random variables $Y_1$ and $Y_2$ to be not independent but perfectly correlated. Since it is a very simple case of dependence and we already know its structure we can just write $Y_1 = Y_2$ in our formula.\\
+It would be also possible to use Gaussian Copula for calculations, since we know that two variables are standard normally distributed and have linear dependence. \\
+The basic idea behind it is to transform each standard normal variable to a uniform distribution using standard normal cumulative distribution function and afterwards the inverse of this function is used to transform the joint distribution back to the original scale. In both cases we would end up with the same result.\\
+
+<<secondproblem, echo=TRUE, eval=TRUE>>=
+simulate_V2 <- function(sigma1, sigma2, alpha, n, N = 1000) {
+  # Define function to calculate V1
+  calc_V2 <- function() {
+    # Simulate standard normal variables Y1 and Y2
+    Y1 <- rnorm(n)
+    Y2 <- Y1
+
+    # Calculate S1 and S2
+    S1 <- exp((-sigma1^2/2) + sigma1*Y1)
+    S2 <- exp((-sigma2^2/2) + sigma2*Y2)
+
+    # Calculate V1 = S1 + S2
+    V2 <- S1 + S2
+
+    return(V2)
+  }
+
+  # Simulate V1 values
+  sim_V2 <- replicate(N, calc_V2())
+  
+
+  # Calculate VaR at alpha level
+  VaR <- quantile(sim_V2, 1-alpha, names = FALSE)
+  
+  # Bootstrap
+  B <- 1000
+  VaR_boot <- numeric(B)
+  for (i in 1:B) {
+    # Resample from V1 distribution
+    V2_boot <- sample(sim_V2, n, replace=TRUE)
+
+    # Compute VaR at alpha level
+    VaR_boot[i] <- quantile(V2_boot, 1-alpha)
+  }
+
+  # Calculate confidence intervals
+  lower <- quantile(VaR_boot, alpha/2)
+  upper <- quantile(VaR_boot, 1-alpha/2)
+
+  # Return results as list
+  return(list(sim_V2 = sim_V2, VaR = VaR, lower = lower, upper = upper))
+}
+@
+
+Again, we may now use the function for the different cases. We now define a function \texttt{plot\_density\_V2} to plot the distribution of $V_2$.
+
+<<echo=TRUE, eval=TRUE>>=
+plot_density_V2 <- function(results) {
+  # Extract simulation results
+  sim_V2 <- results$sim_V2
+  VaR <- results$VaR
+  
+  # Create density plot
+  plot(density(sim_V2), main = "Density plot of V2", xlim = c(0,10), ylim = c(0, 1.2))
+  
+  # Add vertical lines for VaR and confidence interval
+  abline(v = VaR, col = "red", lwd = 2, lty = "dashed")
+  
+  # Add legend
+  legend("topright", legend = c("VaR"),
+         col = c("red"), lty = c("dashed"), lwd = 2)
+}
+@
+
+We can also create a QQ-Plot.
+
+<<echo=TRUE, eval=TRUE>>=
+plot_qq_02 <- function(b) {
+  V2 <- b$sim_V2
+  
+  # Create QQ-plot
+  qqnorm(V2, ylim = c(0, 40))
+  qqline(V2, col = "red")
+}
+@
+
+Finally, we can now look at the different cases.
+
+<<diffcases21, echo=TRUE, eval=TRUE>>=
+results_01 <- simulate_V2(0.5, 0.5, 0.05, 10^3)
+final_results_01 <- results_01[c("VaR", "lower", "upper")]
+
+results_02 <-simulate_V2(0.5, 0.5, 0.01, 10^3)
+final_results_02 <- results_02[c("VaR", "lower", "upper")]
+
+results_03 <- simulate_V2(1, 0.1, 0.05, 10^3)
+final_results_03 <- results_03[c("VaR", "lower", "upper")]
+
+results_04 <-simulate_V2(1, 0.1, 0.01, 10^3)
+final_results_04 <- results_04[c("VaR", "lower", "upper")]
+@
+
+Using $(\sigma_1^2, \sigma_2^2) = (0.5, 0.5)$, and then, first, $\alpha = 0.05$ followed by $\alpha = 0.01$, we can clearly see that the VaR is higher for a higher level of confidence. Generally, we expected this.
+
+<<diffcases22, echo=TRUE, eval=TRUE>>=
+final_results_01
+final_results_02
+@
+
+Using $(\sigma_1^2, \sigma_2^2) = (1, 0.1)$, and then, first, $\alpha = 0.05$ followed by $\alpha = 0.01$, we can clearly see that the VaR is higher for a higher level of confidence. Generally, we expected this. At both levels of confidence, the VaR is higher than in our earlier calculations. Rather naturally, correlated assets are riskier assets that will lead to a higher VaR.
+
+<<diffcases23, echo=TRUE, eval=TRUE>>=
+final_results_03
+final_results_04
+@
+
+And we may also have a look at $V_2$ itself. The graph on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the graph on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. Note that we use $\alpha = 0.05$ in both cases. We can see that the plot on the right has a higher density at point 2 on x-axis and the VaR is shifted to the right. 
+
+<<firstgraphic2,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+plot_density_V2(results_01)
+plot_density_V2(results_03)
+@
+
+Once again the plot on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the graph on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. We use $\alpha = 0.5$ in both cases. From this QQ-Plot we can deduce, that in both cases $V_2$ doesn't follow normal distribution and is skewed to the right. The second plot has a heavier tail and is more likely to contain extreme values which indicates that the portfolio on second plot is riskier.
+
+<<secondgraphic2,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+plot_qq_02(simulate_V2(0.5,0.5,0.05,10^2))
+plot_qq_02(simulate_V2(1,0.1,0.05,10^2))
+@
+
+Lastly, we estimate the sample size necessary to have an estimate of accuracy of $\pm 1\%$.
+
+<<acc2, echo=TRUE, eval=TRUE>>=
+estimate_sample_size_VaR02 <- function(sigma1, sigma2, alpha, accuracy) {
+  B <- 1000
+  n <- 10 # Initial sample size
+  
+  while (TRUE) {
+    
+    # Simulate V2 with current sample size and current sigma estimate
+    res <- simulate_V2(sigma1, sigma2, alpha, n)
+    
+    # Extract VaR from simulation result
+    VaR <- res$VaR
+    
+    # Bootstrap to estimate standard deviation of VaR
+    VaR_boot <- numeric(B)
+    for (i in 1:B) {
+      # Resample from V2 distribution
+      V2_boot <- sample(res$sim_V2, n, replace=TRUE)
+      
+      # Compute VaR at alpha level
+      VaR_boot[i] <- quantile(V2_boot, 1-alpha)
+    }
+    
+    # Calculate standard deviation and mean of VaR
+    var_VaR <- var(VaR_boot)
+    mean_VaR <- mean(VaR_boot)
+    
+    # Calculate sample size using Chebyshev's inequality
+    n_new <- ceiling((var_VaR / (mean_VaR^2)) * (1/((alpha^2)*(accuracy))))
+    
+    # Check if the sample size has converged
+    if (abs(n_new - n) < 1) {
+      break
+    }
+    
+    # update sample size
+    n <- n_new
+    
+  }
+  return(n)
+}
+@
+
+Using $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$ in the first case and $\sigma_1 = 1$ and $\sigma_2 = 0.1$ in the second case, we get the following:
+
+<<echo=TRUE, eval=FALSE>>=
+estimate_sample_size_VaR02(0.5,0.5,0.05,0.01)
+estimate_sample_size_VaR02(1,0.1,0.05,0.01)
+@
+Unfortunately, it is not the most effective algorithm to estimate minimal sample size for given level of accuracy and it takes extremely long to compute. The sample size for the first set of parameters is 208 and for the second one it is 322.
+\section{Third Problem}
+Thirdly, we look at the case when $Y_1$ and $Y_2$ are not independent, but are perfectly negatively correlated. Due to the similarity to the second problem, we shall reuse the code. Note that the correlation coefficient changed from $1$ to $-1$.
+
+<<thirdproblem, echo=TRUE, eval=TRUE>>=
+simulate_V3 <- function(sigma1, sigma2, alpha, n, N = 1000) {
+  # Define function to calculate V3
+  calc_V3 <- function() {
+
+    # Transform to standard normal variable Y
+    Y1 <- rnorm(n)
+    Y2 <- -Y1
+
+    # Calculate S1 and S2
+    S1 <- exp((-sigma1^2/2) + sigma1*Y1)
+    S2 <- exp((-sigma2^2/2) + sigma2*Y2)
+    
+    # Calculate V3 = S1 + S2
+    V3 <- S1 + S2
+
+    return(V3)
+  }
+
+  # Simulate V3 values
+  sim_V3 <- replicate(N, calc_V3())
+
+  # Calculate VaR at alpha level
+  VaR <- quantile(sim_V3, 1-alpha, names = FALSE)
+  
+  # Bootstrap
+  B <- 1000
+  VaR_boot <- numeric(B)
+  for (i in 1:B) {
+    # Resample from V3 distribution
+    V3_boot <- sample(sim_V3, n, replace=TRUE)
+
+    # Compute VaR at alpha level
+    VaR_boot[i] <- quantile(V3_boot, 1-alpha)
+  }
+
+  # Calculate confidence intervals
+  lower <- quantile(VaR_boot, alpha/2)
+  upper <- quantile(VaR_boot, 1-alpha/2)
+
+  # Return results as list
+  return(list(sim_V3 = sim_V3, VaR = VaR, lower = lower, upper = upper))
+}
+@
+
+Again, we may now use the function for different cases. We now define a function \texttt{plot\_density\_V3} to plot the distribution of $V_3$.
+
+<<echo=TRUE, eval=TRUE>>=
+plot_density_V3 <- function(results) {
+  # Extract simulation results
+  sim_V3 <- results$sim_V3
+  VaR <- results$VaR
+  
+  # Create density plot
+  plot(density(sim_V3), main = "Density plot of V3", xlim = c(0,6), ylim = c(0,6))
+  
+  # Add vertical lines for VaR and confidence interval
+  abline(v = VaR, col = "red", lwd = 2, lty = "dashed")
+  
+  # Add legend
+  legend("topright", legend = c("VaR"),
+         col = c("red"), lty = c("dashed"), lwd = 2)
+}
+@
+
+We can also create a QQ-Plot.
+
+<<echo=TRUE, eval=TRUE>>=
+plot_qq_03 <- function(b) {
+  V3 <- b$sim_V3
+  
+  # Create QQ-plot
+  qqnorm(V3, ylim = c(0, 25))
+  qqline(V3, col = "red")
+}
+@
+
+Finally, we can now look at the different cases.
+
+<<diffcases31, echo=TRUE, eval=TRUE>>=
+results_01 <- simulate_V3(0.5, 0.5, 0.05, 10^3)
+final_results_01 <- results_01[c("VaR", "lower", "upper")]
+
+results_02 <-simulate_V3(0.5, 0.5, 0.01, 10^3)
+final_results_02 <- results_02[c("VaR", "lower", "upper")]
+
+results_03 <- simulate_V3(1, 0.1, 0.05, 10^3)
+final_results_03 <- results_03[c("VaR", "lower", "upper")]
+
+results_04 <-simulate_V3(1, 0.1, 0.01, 10^3)
+final_results_04 <- results_04[c("VaR", "lower", "upper")]
+@
+
+Using $(\sigma_1^2, \sigma_2^2) = (0.5, 0.5)$, and then, first, $\alpha = 0.05$ followed by $\alpha = 0.01$, we can clearly see that the VaR is higher for a higher level of confidence. Generally, we expected this.
+
+<<diffcases32, echo=TRUE, eval=TRUE>>=
+final_results_01
+final_results_02
+@
+
+Using $(\sigma_1^2, \sigma_2^2) = (1, 0.1)$, and then, first, $\alpha = 0.05$ followed by $\alpha = 0.01$, we can clearly see that the VaR is higher for a higher level of confidence. Generally, we expected this. At both levels of confidence, the VaR is higher than in our earlier calculations. Rather naturally, correlated assets are riskier assets that will lead to a higher VaR. When comparing these results to our results from \textbf{P2}, when can clearly see that the VaR is lower in every case.
+
+<<diffcases33, echo=TRUE, eval=TRUE>>=
+final_results_03
+final_results_04
+@
+
+And we may also have a look at $V_3$ itself. The graph on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the graph on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. Note that we use $\alpha = 0.05$ in both cases.
+
+<<firstgraphic3,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+plot_density_V3(results_01)
+plot_density_V3(results_03)
+@
+
+The QQ-Plot on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the QQ-Plot on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. Again, we use $\alpha = 0.05$ in both cases. Once again in both cases $V_3$ doesn't follow normal distribution and is skewed to the right. The second plot has a heavier tail and is more likely to contain extreme values which indicates that the portfolio on second plot is riskier.
+
+<<secondgraphic3,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+plot_qq_03(simulate_V3(0.5,0.5,0.05,10^2))
+plot_qq_03(simulate_V3(1,0.1,0.05,10^2))
+@
+
+Lastly, we estimate the sample size necessary to have an estimate of accuracy of $\pm 1\%$.
+
+<<acc3, echo=TRUE, eval=TRUE>>=
+estimate_sample_size_VaR03 <- function(sigma1, sigma2, alpha, accuracy) {
+  B <- 1000
+  n <- 10 # Initial sample size
+  
+  while (TRUE) {
+    
+    # Simulate V3 with current sample size and current sigma estimate
+    res <- simulate_V3(sigma1, sigma2, alpha, n)
+    
+    # Extract VaR from simulation result
+    VaR <- res$VaR
+    
+    # Bootstrap to estimate standard deviation of VaR
+    VaR_boot <- numeric(B)
+    for (i in 1:B) {
+      # Resample from V3 distribution
+      V3_boot <- sample(res$sim_V3, n, replace=TRUE)
+      
+      # Compute VaR at alpha level
+      VaR_boot[i] <- quantile(V3_boot, 1-alpha)
+    }
+    
+    # Calculate standard deviation and mean of VaR
+    var_VaR <- var(VaR_boot)
+    mean_VaR <- mean(VaR_boot)
+    
+    # Calculate sample size using Chebyshev's inequality
+    n_new <- ceiling((var_VaR / (mean_VaR^2)) * (1/((alpha^2)*(accuracy))))
+    
+    # Check if the sample size has converged
+    if (abs(n_new - n) < 1) {
+      break
+    }
+    
+    # update sample size
+    n <- n_new
+    
+  }
+  return(n)
+}
+@
+
+Using $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$ in the first case and $\sigma_1 = 1$ and $\sigma_2 = 0.1$ in the second case, we get the following:
+
+<<echo=TRUE, eval=FALSE>>=
+estimate_sample_size_VaR03(0.5,0.5,0.05,0.01)
+estimate_sample_size_VaR03(1,0.1,0.05,0.01)
+@
+Unfortunately, it is not the most effective algorithm to estimate minimal sample size for given level of accuracy and it takes extremely long to compute. The sample size for the first set of parameters is 138 and for the second one it is 329. Once again note that the required sample size for riskier portfolio is bigger.
+\section{Fourth Problem}
+Now we will look at the case when $Y_1$ and $Y_2$ are either perfectly positively correlated or perfectly negatively correlated with probability $1/2$. 
+We will use 'copula' package that provides us with the built-in \texttt{normalCopula} function that takes the correlation coefficient and number of dimensions as parameters and creates a copula object that is later used by the built-in \texttt{rCopula} function. Note that we use Gaussian copula for our computations. It models dependence structure between variables assuming that each variable follows standard normal distribution which is perfectly relevant in our case. 
+
+<<fourthproblem, echo=TRUE, eval=TRUE>>=
+library(copula)
+simulate_V4 <- function(sigma1, sigma2, alpha, n, N = 1000) {
+  # Define function to calculate V4
+  calc_V4 <- function() {
+    # Generate samples of Y1 and Y2
+    Y1 <- rnorm(n)
+    
+    #We checked this line of code and it in fact produces an array of numbers
+    #randomly (with probability 0.5) assigning negative or positive values to Y1
+    Y2 <- ifelse(runif(n) <= 0.5, Y1, -Y1)
+    
+    # Estimate the correlation between Y1 and Y2
+    rho_hat <- cor(Y1, Y2)
+    
+    # Create the Gaussian copula with the estimated correlation
+    copula <- normalCopula(param = rho_hat, dim = 2)
+    
+    # Simulate correlated standard normal variables from copula
+    data <- rCopula(n, copula)
+    U1 <- data[, 1]
+    U2 <- data[, 2]
+    
+    # Transform to standard normal variables Y1 and Y2
+    Y1 <- qnorm(U1)
+    Y2 <- qnorm(U2)
+    
+    # Calculate S1 and S2
+    S1 <- exp((-sigma1^2/2) + sigma1*Y1)
+    S2 <- exp((-sigma2^2/2) + sigma2*Y2)
+    
+    # Calculate V4 = S1 + S2
+    V4 <- S1 + S2
+  
+    return(V4)
+  }
+
+  # Simulate V4 values
+  sim_V4 <- replicate(N, calc_V4())
+
+  # Calculate VaR at alpha level
+  VaR <- quantile(sim_V4, 1-alpha, names = FALSE)
+  
+  # Bootstrap
+  B <- 1000
+  VaR_boot <- numeric(B)
+  for (i in 1:B) {
+    # Resample from V4 distribution
+    V4_boot <- sample(sim_V4, n, replace=TRUE)
+
+    # Compute VaR at alpha level
+    VaR_boot[i] <- quantile(V4_boot, 1-alpha)
+  }
+
+  # Calculate confidence intervals
+  lower <- quantile(VaR_boot, alpha/2)
+  upper <- quantile(VaR_boot, 1-alpha/2)
+
+  # Return results as list
+  return(list(sim_V4 = sim_V4, VaR = VaR, lower = lower, upper = upper))
+}
+@
+
+Again, we may now use the function for different cases. We now define a function \texttt{plot\_density\_V4} to plot the distribution of $V4$.
+
+<<echo=TRUE, eval=TRUE>>=
+plot_density_V4 <- function(results) {
+  # Extract simulation results
+  sim_V4 <- results$sim_V4
+  VaR <- results$VaR
+  
+  # Create density plot
+  plot(density(sim_V4), main = "Density plot of V4", xlim = c(0,10), ylim = c(0, 1.2))
+  
+  # Add vertical lines for VaR and confidence interval
+  abline(v = VaR, col = "red", lwd = 2, lty = "dashed")
+  
+  # Add legend
+  legend("topright", legend = c("VaR"),
+         col = c("red"), lty = c("dashed"), lwd = 2)
+}
+@
+
+We can also create a QQ-Plot.
+
+<<echo=TRUE, eval=TRUE>>=
+plot_qq_04 <- function(b) {
+  V4 <- b$sim_V4
+  
+  # Create QQ-plot
+  qqnorm(V4, ylim = c(0, 25))
+  qqline(V4, col = "red")
+}
+@
+
+Finally, we can now look at the different cases.
+
+<<diffcases41, echo=TRUE, eval=TRUE>>=
+results_01 <- simulate_V4(0.5, 0.5, 0.05, 10^3)
+final_results_01 <- results_01[c("VaR", "lower", "upper")]
+
+results_02 <-simulate_V4(0.5, 0.5, 0.01, 10^3)
+final_results_02 <- results_02[c("VaR", "lower", "upper")]
+
+results_03 <- simulate_V4(1, 0.1, 0.05, 10^3)
+final_results_03 <- results_03[c("VaR", "lower", "upper")]
+
+results_04 <-simulate_V4(1, 0.1, 0.01, 10^3)
+final_results_04 <- results_04[c("VaR", "lower", "upper")]
+@
+
+Using $(\sigma_1^2, \sigma_2^2) = (0.5, 0.5)$, and then, first, $\alpha = 0.05$ followed by $\alpha = 0.01$, we can clearly see that the VaR is higher for a higher level of confidence. Generally, we expected this.
+
+<<diffcases42, echo=TRUE, eval=TRUE>>=
+final_results_01
+final_results_02
+@
+
+Using $(\sigma_1^2, \sigma_2^2) = (1, 0.1)$, and then, first, $\alpha = 0.05$ followed by $\alpha = 0.01$, we can clearly see that the VaR is higher for a higher level of confidence. Generally, we expected this. At both levels of confidence, the VaR is higher than in our earlier calculations. Note that compared to \textbf{P3}, all of the VaR estimates are higher.
+
+<<diffcases43, echo=TRUE, eval=TRUE>>=
+final_results_03
+final_results_04
+@
+
+And we may also have a look at $V4$ itself. The graph on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the graph on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. Note that we use $\alpha = 0.5$ in both cases. We can see that Value at Risk on the second plot is shifted to the right which indicates that that this portfolio is riskier. 
+
+<<firstgraphic4,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+plot_density_V4(results_01)
+plot_density_V4(results_03)
+@
+
+The QQ-Plot on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the graph on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. Again, we use $\alpha = 0.5$ in both cases. In both cases $V_4$ doesn't follow normal distribution and is skewed to the right. The second plot has a heavier tail and is more likely to contain extreme values which indicates that the portfolio on second plot is riskier.
+
+<<secondgraphic4,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+plot_qq_04(simulate_V4(0.5,0.5,0.05,10^2))
+plot_qq_04(simulate_V4(1,0.1,0.05,10^2))
+@
+
+Lastly, we estimate the sample size necessary to have an estimate of accuracy of $\pm 1\%$.
+
+<<acc4, echo=TRUE, eval=TRUE>>=
+estimate_sample_size_VaR04 <- function(sigma1, sigma2, alpha, accuracy) {
+  B <- 1000
+  n <- 10 # Initial sample size
+  
+  while (TRUE) {
+    
+    # Simulate V4 with current sample size and current sigma estimate
+    res <- simulate_V4(sigma1, sigma2, alpha, n)
+    
+    # Extract VaR from simulation result
+    VaR <- res$VaR
+    
+    # Bootstrap to estimate standard deviation of VaR
+    VaR_boot <- numeric(B)
+    for (i in 1:B) {
+      # Resample from V4 distribution
+      V4_boot <- sample(res$sim_V4, n, replace=TRUE)
+      
+      # Compute VaR at alpha level
+      VaR_boot[i] <- quantile(V4_boot, 1-alpha)
+    }
+    
+    # Calculate standard deviation and mean of VaR
+    var_VaR <- var(VaR_boot)
+    mean_VaR <- mean(VaR_boot)
+    
+    # Calculate sample size using Chebyshev's inequality
+    n_new <- ceiling((var_VaR / (mean_VaR^2)) * (1/((alpha^2)*(accuracy))))
+    
+    # Check if the sample size has converged
+    if (abs(n_new - n) < 1) {
+      break
+    }
+    
+    # update sample size
+    n <- n_new
+    
+  }
+  return(n)
+}
+@
+
+Using $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$ in the first case and $\sigma_1 = 1$ and $\sigma_2 = 0.1$ in the second case, we get the following:
+
+<<echo=TRUE, eval=FALSE>>=
+estimate_sample_size_VaR04(0.5,0.5,0.05,0.01)
+estimate_sample_size_VaR04(1,0.1,0.05,0.01)
+@
+Unfortunately, it is not the most effective algorithm to estimate minimal sample size for given level of accuracy and it takes extremely long to compute. The sample size for the first set of parameters is 150 and for the second one it is 330. Once again note that the required sample size for riskier portfolio is bigger.
+\section{Fifth Problem}
+Lastly, we look at the case when $Y_1$ and $Y_2$ are always positively correlated, however, their exact correlation is unknown. We decided to use Clayton copula to solve this problem. Note that it wasn't necessary to use exactly this type of copulas.\\
+Clayton copula measures the dependence between the lower tails of two variables. The key parameter in Clayton copula is theta as it determines the strength of the dependence between variables. In our code in order to calculate the theta parameter we will use Kendall's tau, a statistical measure that reflects strength and direction of the relationship between two variables. 
+
+<<fifthproblem, echo=TRUE, eval=TRUE>>=
+simulate_V5 <- function(sigma1, sigma2, alpha, n, N = 1000) {
+  # Define function to calculate V5
+  calc_V5 <- function() {
+    # Generate Y1 and Z2
+    Y1 <- rnorm(n)
+    Z2 <- rnorm(n)
+    
+    # Ensure Y1 and Y2 have same sign
+    Y2 <- ifelse(Y1 * Z2 >= 0, Z2, -Z2)
+    
+    # Calculate Kendall's tau
+    tau <- cor(Y1, Y2, method = "kendall")
+    
+    # Calculate parameter of Clayton copula
+    theta <- (2 * tau) / (1 - tau)
+    
+    # Generate Clayton copula variables
+    U <- rCopula(n, claytonCopula(theta, dim = 2))
+    
+    # Transform uniform variables to normal variables
+    X <- qnorm(U)
+    
+    # Calculate S1 and S2
+    S1 <- exp((-sigma1^2/2) + sigma1 * X[, 1])
+    S2 <- exp((-sigma2^2/2) + sigma2 * X[, 2])
+    
+    # Calculate V5
+    V5 <- S1 + S2
+    
+    return(V5)
+  }
+  
+  # Simulate V5 values
+  sim_V5 <- replicate(N, calc_V5())
+  
+  # Calculate VaR at alpha level
+  VaR <- quantile(sim_V5, 1-alpha, names = FALSE)
+  
+  # Bootstrap
+  B <- 1000
+  VaR_boot <- numeric(B)
+  for (i in 1:B) {
+    # Resample from V5 distribution
+    V5_boot <- sample(sim_V5, n, replace=TRUE)
+    
+    # Compute VaR at alpha level
+    VaR_boot[i] <- quantile(V5_boot, 1-alpha)
+  }
+  
+  # Calculate confidence intervals
+  lower <- quantile(VaR_boot, alpha/2)
+  upper <- quantile(VaR_boot, 1-alpha/2)
+  
+  # Return results as list
+  return(list(sim_V5 = sim_V5, VaR = VaR, lower = lower, upper = upper))
+}
+@
+
+Again, we may now use the function for different cases. We now define a function \texttt{plot\_density\_V5} to plot the distribution of $V_5$.
+
+<<echo=TRUE, eval=TRUE>>=
+plot_density_V5 <- function(results) {
+  # Extract simulation results
+  sim_V5 <- results$sim_V5
+  VaR <- results$VaR
+  
+  # Create density plot
+  plot(density(sim_V5), main = "Density plot of V5", xlim = c(0,10), ylim =c(0, 0.8))
+  
+  # Add vertical lines for VaR and confidence interval
+  abline(v = VaR, col = "red", lwd = 2, lty = "dashed")
+  
+  # Add legend
+  legend("topright", legend = c("VaR"),
+         col = c("red"), lty = c("dashed"), lwd = 2)
+}
+@
+
+We can also create a QQ-Plot. In both cases $V_5$ doesn't follow normal distribution and is skewed to the right. The second plot has a heavier tail and is more likely to contain extreme values which indicates that the portfolio on second plot is riskier.
+
+<<echo=TRUE, eval=TRUE>>=
+plot_qq_05 <- function(b) {
+  V5 <- b$sim_V5
+
+  # Create QQ-plot
+  qqnorm(V5, ylim= c(0,30))
+  qqline(V5, col = "red")
+}
+@
+
+Finally, we can now look at the different cases.
+
+<<diffcases51, echo=TRUE, eval=TRUE>>=
+results_01 <- simulate_V5(0.5, 0.5, 0.05, 10^2)
+final_results_01 <- results_01[c("VaR", "lower", "upper")]
+
+results_02 <-simulate_V5(0.5, 0.5, 0.01, 10^2)
+final_results_02 <- results_02[c("VaR", "lower", "upper")]
+
+results_03 <- simulate_V5(1, 0.1, 0.05, 10^2)
+final_results_03 <- results_03[c("VaR", "lower", "upper")]
+
+results_04 <-simulate_V5(1, 0.1, 0.01, 10^2)
+final_results_04 <- results_04[c("VaR", "lower", "upper")]
+@
+
+Using $(\sigma_1^2, \sigma_2^2) = (0.5, 0.5)$, and then, first, $\alpha = 0.05$ followed by $\alpha = 0.01$:
+
+<<diffcases52, echo=TRUE, eval=TRUE>>=
+final_results_01
+final_results_02
+@
+
+Using $(\sigma_1^2, \sigma_2^2) = (1, 0.1)$, and then, first, $\alpha = 0.05$ followed by $\alpha = 0.01$:
+
+<<diffcases53, echo=TRUE, eval=TRUE>>=
+final_results_03
+final_results_04
+@
+
+And we may also have a look at $V5$ itself. The graph on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the graph on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. Note that we use $\alpha = 0.5$ in both cases. The higher peak of the distribution shows that it is denser in the center comparing to the first plot.
+
+<<firstgraphic5,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+plot_density_V5(results_01)
+plot_density_V5(results_03)
+@
+
+The plot on the left uses $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$, while the graph on the right uses $\sigma_1 = 1$ and $\sigma_2 = 0.1$. Again, we use $\alpha = 0.05$ in both cases. 
+
+<<secondgraphic5,echo=TRUE, eval=TRUE>>=
+par(mfrow=c(1,2))
+plot_qq_05(simulate_V5(0.5,0.5,0.05,10^2))
+plot_qq_05(simulate_V5(1,0.1,0.05,10^2))
+@
+
+Lastly, we estimate the sample size necessary to have an estimate of accuracy of $\pm 1\%$.
+
+<<acc5, echo=TRUE, eval=TRUE>>=
+estimate_sample_size_VaR05 <- function(sigma1, sigma2, alpha, accuracy) {
+  B <- 1000
+  n <- 10 # Initial sample size
+  
+  while (TRUE) {
+    
+    # Simulate V5 with current sample size and current sigma estimate
+    res <- simulate_V5(sigma1, sigma2, alpha, n)
+    
+    # Extract VaR from simulation result
+    VaR <- res$VaR
+    
+    # Bootstrap to estimate standard deviation of VaR
+    VaR_boot <- numeric(B)
+    for (i in 1:B) {
+      # Resample from V5 distribution
+      V5_boot <- sample(res$sim_V5, n, replace=TRUE)
+      
+      # Compute VaR at alpha level
+      VaR_boot[i] <- quantile(V5_boot, 1-alpha)
+    }
+    
+    # Calculate standard deviation and mean of VaR
+    var_VaR <- var(VaR_boot)
+    mean_VaR <- mean(VaR_boot)
+    
+    # Calculate sample size using Chebyshev's inequality
+    n_new <- ceiling((var_VaR / (mean_VaR^2)) * (1/((alpha^2)*(accuracy))))
+    
+    # Check if the sample size has converged
+    if (abs(n_new - n) < 1) {
+      break
+    }
+    
+    # update sample size
+    n <- n_new
+    
+  }
+  return(n)
+}
+@
+
+Using $\sigma_1 = 0.5$ and $\sigma_2 = 0.5$ in the first case and $\sigma_1 = 1$ and $\sigma_2 = 0.1$ in the second case, we get the following:
+
+<<echo=TRUE, eval=FALSE>>=
+estimate_sample_size_VaR05(0.5,0.5,0.05,0.01)
+estimate_sample_size_VaR05(1,0.1,0.05,0.01)
+@
+Unfortunately, it is not the most effective algorithm to estimate minimal sample size for given level of accuracy and it takes extremely long to compute. The sample size for the first set of parameters is 154 and for the second one it is 344. Once again note that the required sample size for riskier portfolio is bigger.
+
+\begin{thebibliography}{1}
+
+\bibitem{a} Dufresne, D. (2008, August). Sums of lognormals. In Actuarial Research Conference (pp. 1-6).
+
+\end{thebibliography}
+\end{document}
